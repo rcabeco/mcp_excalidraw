@@ -52,7 +52,7 @@ function sanitizeFilePath(filePath: string): string {
 }
 
 // Express server configuration
-const EXPRESS_SERVER_URL = process.env.EXPRESS_SERVER_URL || 'http://localhost:3000';
+const EXPRESS_SERVER_URL = process.env.EXPRESS_SERVER_URL || 'http://localhost:4321';
 const ENABLE_CANVAS_SYNC = process.env.ENABLE_CANVAS_SYNC !== 'false'; // Default to true
 
 // API Response types
