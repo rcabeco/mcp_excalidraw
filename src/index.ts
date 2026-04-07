@@ -864,6 +864,18 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'suggest_refinements',
+    description: 'Run composition analysis and return an ordered action list to reach a target quality score. Actions are sorted by estimated impact. Work through them top-to-bottom until current_score + gains >= target_score.',
+    inputSchema: {
+      type: 'object',
+      required: ['plan_id'],
+      properties: {
+        plan_id: { type: 'string', description: 'planId returned by plan_composition' },
+        target_score: { type: 'number', description: 'Target quality score 0–100 (default 85)' }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -2550,6 +2562,69 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
         const ids = (batchData.elements ?? []).map(e => e.id);
         return { content: [{ type: 'text', text: `Created ${ids.length} gradient elements. IDs: ${ids.join(', ')}` }] };
+      }
+
+      case 'suggest_refinements': {
+        const srArgs = request.params.arguments as { plan_id: string; target_score?: number };
+        const target = srArgs.target_score ?? 85;
+        const analysis = await runAnalysis(srArgs.plan_id);
+        const plan = compositionPlans.get(srArgs.plan_id);
+        if (!plan) throw new Error(`Plan ${srArgs.plan_id} not found. Call plan_composition first.`);
+
+        const actions: Array<{ description: string; tool_call: string; impact: string; estimated_score_gain: number }> = [];
+
+        // Under-density zones → suggest adding elements
+        for (const z of analysis.density_report.filter(z => z.status === 'under')) {
+          const needed = z.target_min - z.current;
+          const zoneObj = plan.zones.find(pz => pz.name === z.zone);
+          if (zoneObj) {
+            actions.push({
+              description: `Add ${needed} elements to zone "${z.zone}" (currently ${z.current}/${z.target_min} minimum)`,
+              tool_call: `batch_create_elements with ${needed} elements positioned inside zone: x=${zoneObj.x}–${zoneObj.x + zoneObj.width}, y=${zoneObj.y}–${zoneObj.y + zoneObj.height}`,
+              impact: 'high',
+              estimated_score_gain: Math.min(15, needed * 3)
+            });
+          }
+        }
+
+        // Color adherence
+        if (analysis.color_adherence < 70) {
+          actions.push({
+            description: `Improve palette adherence from ${analysis.color_adherence}% to 80%+ by updating element colors to palette slots`,
+            tool_call: `Use update_element on off-palette elements to set strokeColor/backgroundColor to palette hex values: ${plan.colorPalette.map(c => `${c.slot}=${c.hex}`).join(', ')}`,
+            impact: 'high',
+            estimated_score_gain: 12
+          });
+        }
+
+        // Balance
+        if (Math.abs(1 - analysis.balance.left_right_ratio) > 0.4) {
+          const side = analysis.balance.left_right_ratio > 1 ? 'right' : 'left';
+          actions.push({
+            description: `Canvas is visually unbalanced — add elements to the ${side} side`,
+            tool_call: `batch_create_elements with 2–3 decorative elements on the ${side} half of the canvas`,
+            impact: 'medium',
+            estimated_score_gain: 8
+          });
+        }
+
+        // Apply style preset
+        actions.push({
+          description: `Apply "${plan.stylePreset}" style preset to normalize all elements`,
+          tool_call: `apply_style_preset with preset="${plan.stylePreset}" and element_ids="all"`,
+          impact: analysis.score < 60 ? 'high' : 'medium',
+          estimated_score_gain: 5
+        });
+
+        // Sort by estimated gain descending
+        actions.sort((a, b) => b.estimated_score_gain - a.estimated_score_gain);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ current_score: analysis.score, target_score: target, actions }, null, 2)
+          }]
+        };
       }
 
       default:
