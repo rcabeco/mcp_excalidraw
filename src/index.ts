@@ -1114,7 +1114,6 @@ async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
   // Scoring
   const underZones = density_report.filter(z => z.status === 'under');
   const densityScore = Math.max(0, 100 - underZones.length * 15);
-  const colorScore = color_adherence;
   const balanceScore = Math.max(0, 100 - Math.abs(1 - left_right_ratio) * 30 - Math.abs(1 - top_bottom_ratio) * 20);
   const score = Math.round((densityScore * 0.5) + (balanceScore * 0.5));
 
