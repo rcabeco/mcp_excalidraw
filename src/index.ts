@@ -2559,6 +2559,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ elements: gradientElements })
         });
+        if (!batchResp.ok) throw new Error(`Batch POST failed: ${batchResp.status} ${batchResp.statusText}`);
         const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
         const ids = (batchData.elements ?? []).map(e => e.id);
         return { content: [{ type: 'text', text: `Created ${ids.length} gradient elements. IDs: ${ids.join(', ')}` }] };
