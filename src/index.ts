@@ -203,6 +203,8 @@ const sceneState: SceneState = {
 
 const compositionPlans = new Map<string, CompositionPlan>();
 
+const gradientGroups = new Map<string, string[]>(); // group_id → element IDs
+
 function evictStalePlans(): void {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   for (const [id, plan] of compositionPlans) {
@@ -862,6 +864,17 @@ const tools: Tool[] = [
         color_end: { type: 'string', description: 'End hex color e.g. "#e94560"' },
         direction: { type: 'string', enum: ['horizontal', 'vertical', 'radial'] },
         steps: { type: 'number', description: '8–32 steps (default 16)' }
+      }
+    }
+  },
+  {
+    name: 'clear_gradient',
+    description: 'Remove all elements belonging to a gradient created by simulate_gradient. Pass the group_id returned by simulate_gradient.',
+    inputSchema: {
+      type: 'object',
+      required: ['group_id'],
+      properties: {
+        group_id: { type: 'string', description: 'group_id returned by simulate_gradient' }
       }
     }
   },
@@ -2622,7 +2635,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         if (!batchResp.ok) throw new Error(`Batch POST failed: ${batchResp.status} ${batchResp.statusText}`);
         const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
         const ids = (batchData.elements ?? []).map(e => e.id);
-        return { content: [{ type: 'text', text: `Created ${ids.length} gradient elements. IDs: ${ids.join(', ')}` }] };
+        const groupId = generateId();
+        gradientGroups.set(groupId, ids);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ element_ids: ids, group_id: groupId })
+          }]
+        };
+      }
+
+      case 'clear_gradient': {
+        const cgArgs = request.params.arguments as { group_id: string };
+        const elementIds = gradientGroups.get(cgArgs.group_id);
+        if (!elementIds || elementIds.length === 0) {
+          throw new Error(`No gradient found with group_id "${cgArgs.group_id}"`);
+        }
+        const deleteResults = await Promise.all(
+          elementIds.map(async (id) => {
+            const resp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`, { method: 'DELETE' });
+            return resp.ok;
+          })
+        );
+        const deleted = deleteResults.filter(Boolean).length;
+        gradientGroups.delete(cgArgs.group_id);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ deleted, group_id: cgArgs.group_id })
+          }]
+        };
       }
 
       case 'draw_to_canvas': {
