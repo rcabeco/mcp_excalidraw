@@ -878,6 +878,25 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'draw_to_canvas',
+    description: 'Push elements directly to the live canvas at localhost:4321. Use this to make elements appear in the browser without needing raw HTTP calls. Returns created count and element IDs.',
+    inputSchema: {
+      type: 'object',
+      required: ['elements'],
+      properties: {
+        elements: {
+          type: 'array',
+          items: { type: 'object' },
+          description: 'Array of Excalidraw elements to draw. Each needs at minimum: type, x, y. See element format docs.'
+        },
+        clear_first: {
+          type: 'boolean',
+          description: 'If true, clear the canvas before drawing (default: false)'
+        }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -2608,6 +2627,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
         const ids = (batchData.elements ?? []).map(e => e.id);
         return { content: [{ type: 'text', text: `Created ${ids.length} gradient elements. IDs: ${ids.join(', ')}` }] };
+      }
+
+      case 'draw_to_canvas': {
+        const dtcArgs = request.params.arguments as { elements: unknown[]; clear_first?: boolean };
+        if (dtcArgs.clear_first) {
+          await fetch(`${EXPRESS_SERVER_URL}/api/elements/clear`, { method: 'DELETE' });
+        }
+        const batchResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ elements: dtcArgs.elements })
+        });
+        if (!batchResp.ok) {
+          const errText = await batchResp.text();
+          throw new Error(`Canvas batch POST failed: ${batchResp.status} ${errText}`);
+        }
+        const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
+        const elementIds = (batchData.elements ?? []).map(e => e.id);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ created: elementIds.length, element_ids: elementIds })
+          }]
+        };
       }
 
       case 'suggest_refinements': {
