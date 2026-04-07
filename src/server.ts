@@ -760,7 +760,8 @@ app.post('/api/export/image', (req: Request, res: Response) => {
       type: 'export_image_request',
       requestId,
       format,
-      background: background ?? true
+      background: background ?? true,
+      scale: exportScale
     });
 
     exportPromise
