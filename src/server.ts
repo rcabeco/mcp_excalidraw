@@ -120,6 +120,7 @@ const CreateElementSchema = z.object({
   startArrowhead: z.string().nullable().optional(),
   endArrowhead: z.string().nullable().optional(),
   elbowed: z.boolean().optional(),
+  layer: z.number().int().min(0).max(99).optional(),
 });
 
 const UpdateElementSchema = z.object({
@@ -154,6 +155,7 @@ const UpdateElementSchema = z.object({
   startArrowhead: z.string().nullable().optional(),
   endArrowhead: z.string().nullable().optional(),
   elbowed: z.boolean().optional(),
+  layer: z.number().int().min(0).max(99).optional(),
 });
 
 // API Routes
@@ -563,6 +565,9 @@ app.post('/api/elements/batch', (req: Request, res: Response) => {
 
     // Resolve arrow bindings (computes positions, startBinding, endBinding, boundElements)
     resolveArrowBindings(createdElements);
+
+    // Sort by layer (lower layer = background = earlier in array = rendered behind)
+    createdElements.sort((a, b) => (a.layer ?? 1) - (b.layer ?? 1));
 
     // Store all elements after binding resolution
     createdElements.forEach(el => elements.set(el.id, el));
