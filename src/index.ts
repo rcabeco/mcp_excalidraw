@@ -1843,9 +1843,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       }
 
       case 'read_diagram_guide': {
-        return {
-          content: [{ type: 'text', text: DIAGRAM_DESIGN_GUIDE }]
-        };
+        // Load the rich drawing guide if available, fall back to legacy guide
+        const guidePath = path.join(path.dirname(fileURLToPath(import.meta.url)),
+          '../skills/excalidraw-skill/DRAWING_GUIDE.md');
+        let guideText = DIAGRAM_DESIGN_GUIDE; // legacy fallback
+        try {
+          guideText = fs.readFileSync(guidePath, 'utf8');
+        } catch {
+          logger.warn('DRAWING_GUIDE.md not found, using legacy guide');
+        }
+        return { content: [{ type: 'text', text: guideText }] };
       }
 
       case 'export_to_excalidraw_url': {
