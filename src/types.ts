@@ -152,33 +152,38 @@ export interface ColorSlot {
   hex: string;
 }
 
+export interface DensityTarget {
+  min: number;
+  max: number;
+}
+
 export interface CompositionZone {
   name: string;
   x: number;
   y: number;
   width: number;
   height: number;
-  density_target: { min: number; max: number };
+  densityTarget: DensityTarget;
 }
 
 export interface CompositionPhase {
   phase: number;
   zone: string;
-  element_types: string[];
-  target_count: number;
+  elementTypes: ExcalidrawElementType[];
+  targetCount: number;
 }
 
 export interface CompositionPlan {
-  plan_id: string;
-  drawing_type: DrawingType;
-  canvas_width: number;
-  canvas_height: number;
-  style_preset: StylePreset;
+  planId: string;
+  drawingType: DrawingType;
+  canvasWidth: number;
+  canvasHeight: number;
+  stylePreset: StylePreset;
   zones: CompositionZone[];
-  color_palette: ColorSlot[];
+  colorPalette: ColorSlot[];
   phases: CompositionPhase[];
-  composition_rules: string[];
-  created_at: number; // Date.now()
+  compositionRules: string[];
+  createdAt: number; // Date.now()
 }
 
 // API Response types
