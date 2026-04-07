@@ -824,6 +824,24 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'apply_style_preset',
+    description: 'Bulk-apply a visual style preset to elements. Presets: Sketchy (rough hand-drawn), Clean (sharp minimal), Painted (textured variable-width), Technical (precise monochrome+accent), Isometric (30° grid). Use after Phase 3 BUILD to normalize visual style.',
+    inputSchema: {
+      type: 'object',
+      required: ['preset', 'element_ids'],
+      properties: {
+        preset: { type: 'string', enum: ['Sketchy', 'Clean', 'Painted', 'Technical', 'Isometric'] },
+        element_ids: {
+          oneOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'string', enum: ['all'] }
+          ],
+          description: 'Element IDs to apply preset to, or "all" for all canvas elements'
+        }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -2401,6 +2419,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         const acArgs = request.params.arguments as { plan_id: string; element_ids?: string[] };
         const result = await runAnalysis(acArgs.plan_id, acArgs.element_ids);
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case 'apply_style_preset': {
+        const aspArgs = request.params.arguments as { preset: StylePreset; element_ids: string[] | 'all' };
+        const PRESET_PROPS: Record<StylePreset, (area: number) => Record<string, unknown>> = {
+          Sketchy:   () => ({ roughness: 2, strokeWidth: 2, fillStyle: 'hachure' }),
+          Clean:     () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' }),
+          Painted:   (area) => ({ roughness: 1, strokeWidth: Math.min(4, 1 + Math.floor(area / 10000)), fillStyle: area > 5000 ? 'cross-hatch' : 'solid' }),
+          Technical: () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' }),
+          Isometric: () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' })
+        };
+
+        let ids: string[];
+        if (aspArgs.element_ids === 'all') {
+          const allResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+          const allData = await allResp.json() as { elements?: Array<{ id: string }> };
+          ids = (allData.elements ?? []).map(e => e.id);
+        } else {
+          ids = aspArgs.element_ids;
+        }
+
+        let updated = 0;
+        for (const id of ids) {
+          const elResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`);
+          if (!elResp.ok) continue;
+          const elData = await elResp.json() as { element?: { width?: number; height?: number } };
+          const el = elData.element;
+          if (!el) continue;
+          const area = (el.width ?? 20) * (el.height ?? 20);
+          const props = PRESET_PROPS[aspArgs.preset](area);
+          await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, ...props })
+          });
+          updated++;
+        }
+
+        return { content: [{ type: 'text', text: `Applied "${aspArgs.preset}" preset to ${updated} elements.` }] };
       }
 
       default:
