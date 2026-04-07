@@ -812,6 +812,18 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'analyze_composition',
+    description: 'Score the current canvas against a composition plan. Returns a 0-100 quality score, balance metrics, per-zone density status, color adherence %, and a prioritized feedback list. Call after each drawing phase to track improvement.',
+    inputSchema: {
+      type: 'object',
+      required: ['plan_id'],
+      properties: {
+        plan_id: { type: 'string', description: 'planId returned by plan_composition' },
+        element_ids: { type: 'array', items: { type: 'string' }, description: 'Scope to a subset of elements (omit for full canvas)' }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -956,6 +968,79 @@ function convertTextToLabel(element: ServerElement): ServerElement {
     } as ServerElement;
   }
   return element;
+}
+
+async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
+  score: number;
+  balance: { left_right_ratio: number; top_bottom_ratio: number };
+  density_report: Array<{ zone: string; current: number; target_min: number; target_max: number; status: string }>;
+  color_adherence: number;
+  feedback: Array<{ message: string; impact: string; zone?: string }>;
+}> {
+  const plan = compositionPlans.get(planId);
+  if (!plan) throw new Error(`Plan ${planId} not found. Call plan_composition first.`);
+
+  // Fetch metrics from canvas server
+  const metricsResp = await fetch(`${EXPRESS_SERVER_URL}/api/composition/metrics`);
+  if (!metricsResp.ok) throw new Error('Failed to fetch composition metrics from canvas server');
+  const metrics = await metricsResp.json() as Record<string, unknown>;
+
+  // Fetch all elements
+  const elemsResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+  const elemsData = await elemsResp.json() as { elements?: Record<string, unknown>[] };
+  let allElements: Record<string, unknown>[] = elemsData.elements ?? [];
+  if (elementIds && elementIds.length > 0) {
+    const idSet = new Set(elementIds);
+    allElements = allElements.filter((e) => idSet.has(e.id as string));
+  }
+
+  // Per-zone density
+  const density_report = plan.zones.map(zone => {
+    const inZone = allElements.filter((el) => {
+      const cx = (el.x as number) + ((el.width as number) ?? 0) / 2;
+      const cy = (el.y as number) + ((el.height as number) ?? 0) / 2;
+      return cx >= zone.x && cx <= zone.x + zone.width && cy >= zone.y && cy <= zone.y + zone.height;
+    });
+    const status = inZone.length < zone.densityTarget.min ? 'under'
+      : inZone.length > zone.densityTarget.max ? 'over' : 'good';
+    return { zone: zone.name, current: inZone.length, target_min: zone.densityTarget.min, target_max: zone.densityTarget.max, status };
+  });
+
+  // Color adherence
+  const paletteHexes = new Set(plan.colorPalette.map(c => c.hex.toLowerCase()));
+  const coloredEls = allElements.filter((el) => el.strokeColor || el.backgroundColor);
+  const adheringEls = coloredEls.filter((el) =>
+    paletteHexes.has(((el.strokeColor as string) ?? '').toLowerCase()) ||
+    paletteHexes.has(((el.backgroundColor as string) ?? '').toLowerCase())
+  );
+  const color_adherence = coloredEls.length > 0 ? Math.round((adheringEls.length / coloredEls.length) * 100) : 0;
+
+  // Balance from density grid
+  const grid = (metrics.element_density_grid as number[][]) ?? [[0,0,0],[0,0,0],[0,0,0]];
+  const leftWeight = grid.reduce((s, row) => s + row[0]! + row[1]!, 0);
+  const rightWeight = grid.reduce((s, row) => s + row[1]! + row[2]!, 0);
+  const topWeight = grid[0]!.reduce((a, b) => a + b, 0) + grid[1]!.reduce((a, b) => a + b, 0);
+  const bottomWeight = grid[1]!.reduce((a, b) => a + b, 0) + grid[2]!.reduce((a, b) => a + b, 0);
+  const left_right_ratio = rightWeight > 0 ? leftWeight / rightWeight : 1;
+  const top_bottom_ratio = bottomWeight > 0 ? topWeight / bottomWeight : 1;
+
+  // Scoring
+  const underZones = density_report.filter(z => z.status === 'under');
+  const densityScore = Math.max(0, 100 - underZones.length * 15);
+  const colorScore = color_adherence;
+  const balanceScore = Math.max(0, 100 - Math.abs(1 - left_right_ratio) * 30 - Math.abs(1 - top_bottom_ratio) * 20);
+  const score = Math.round((densityScore * 0.4) + (colorScore * 0.35) + (balanceScore * 0.25));
+
+  // Feedback
+  const feedback: Array<{ message: string; impact: string; zone?: string }> = [];
+  for (const z of underZones) {
+    feedback.push({ message: `Zone "${z.zone}" has ${z.current} elements but needs ${z.target_min}–${z.target_max}. Add ${z.target_min - z.current} more.`, impact: 'high', zone: z.zone });
+  }
+  if (color_adherence < 70) feedback.push({ message: `Only ${color_adherence}% of elements use palette colors. Apply the plan palette to more elements.`, impact: 'high' });
+  if (Math.abs(1 - left_right_ratio) > 0.4) feedback.push({ message: `Canvas is visually ${left_right_ratio > 1 ? 'left' : 'right'}-heavy. Add elements to the lighter side.`, impact: 'medium' });
+  if ((metrics.coverage_ratio as number) < 0.3) feedback.push({ message: `Canvas coverage is only ${Math.round((metrics.coverage_ratio as number) * 100)}%. Spread elements further or add more.`, impact: 'medium' });
+
+  return { score, balance: { left_right_ratio, top_bottom_ratio }, density_report, color_adherence, feedback };
 }
 
 // Set up request handler for tool calls
@@ -2310,6 +2395,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         return {
           content: [{ type: 'text', text: JSON.stringify(plan, null, 2) }]
         };
+      }
+
+      case 'analyze_composition': {
+        const acArgs = request.params.arguments as { plan_id: string; element_ids?: string[] };
+        const result = await runAnalysis(acArgs.plan_id, acArgs.element_ids);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
 
       default:
