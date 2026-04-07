@@ -53,6 +53,7 @@ function sanitizeFilePath(filePath: string): string {
 
 // Express server configuration
 const EXPRESS_SERVER_URL = process.env.EXPRESS_SERVER_URL || 'http://localhost:4321';
+// 4321 matches the default PORT in server.ts launch scripts (PORT=4321 node dist/server.js)
 const ENABLE_CANVAS_SYNC = process.env.ENABLE_CANVAS_SYNC !== 'false'; // Default to true
 
 // API Response types
