@@ -2544,33 +2544,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           Isometric: () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' })
         };
 
-        let ids: string[];
-        if (aspArgs.element_ids === 'all') {
-          const allResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
-          const allData = await allResp.json() as { elements?: Array<{ id: string }> };
-          ids = (allData.elements ?? []).map(e => e.id);
-        } else {
-          ids = aspArgs.element_ids;
-        }
+        // Fetch all elements once, then filter in memory
+        const allResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+        if (!allResp.ok) throw new Error(`Failed to fetch elements: ${allResp.status}`);
+        const allData = await allResp.json() as { elements?: Array<{ id: string; width?: number; height?: number }> };
+        const allElements = allData.elements ?? [];
 
-        let updated = 0;
-        for (const id of ids) {
-          const elResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`);
-          if (!elResp.ok) continue;
-          const elData = await elResp.json() as { element?: { width?: number; height?: number } };
-          const el = elData.element;
-          if (!el) continue;
-          const area = (el.width ?? 20) * (el.height ?? 20);
-          const props = PRESET_PROPS[aspArgs.preset](area);
-          const putResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, ...props })
-          });
-          if (!putResp.ok) continue;
-          updated++;
-        }
+        const targets = aspArgs.element_ids === 'all'
+          ? allElements
+          : allElements.filter(e => (aspArgs.element_ids as string[]).includes(e.id));
 
+        // Apply all PUTs in parallel
+        const results = await Promise.all(
+          targets.map(async (el) => {
+            const area = (el.width ?? 20) * (el.height ?? 20);
+            const props = PRESET_PROPS[aspArgs.preset](area);
+            const putResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${el.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: el.id, ...props })
+            });
+            return putResp.ok;
+          })
+        );
+
+        const updated = results.filter(Boolean).length;
         return { content: [{ type: 'text', text: `Applied "${aspArgs.preset}" preset to ${updated} elements.` }] };
       }
 
