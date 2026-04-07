@@ -13,7 +13,7 @@ Before doing anything else, check which mode is available:
 curl -s http://localhost:4321/health
 ```
 
-If `{"status":"ok"}` → canvas server is running. Proceed.
+If response contains `"status":"healthy"` → canvas server is running. Proceed.
 If not → start it: `cd ~/.local/share/mcp-excalidraw && PORT=4321 node dist/server.js &`
 
 ## The 5-Phase Drawing Session
