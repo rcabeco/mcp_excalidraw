@@ -3,6 +3,7 @@ import cors from 'cors';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import logger from './utils/logger.js';
@@ -847,7 +848,7 @@ const pendingExports = new Map<string, PendingExport>();
 
 app.post('/api/export/image', (req: Request, res: Response) => {
   try {
-    const { format, background, scale } = req.body;
+    const { format, background, scale, output_path } = req.body;
     const exportScale = typeof scale === 'number' && [1, 2, 4, 8].includes(scale) ? scale : 1;
 
     if (!format || !['png', 'svg'].includes(format)) {
@@ -904,11 +905,27 @@ app.post('/api/export/image', (req: Request, res: Response) => {
 
     exportPromise
       .then(result => {
-        res.json({
-          success: true,
-          format: result.format,
-          data: result.data
-        });
+        if (output_path) {
+          try {
+            const resolvedPath = path.resolve(output_path as string);
+            if (result.format === 'png') {
+              // data may be a data URL (data:image/png;base64,...) or raw base64
+              const base64 = (result.data as string).replace(/^data:image\/\w+;base64,/, '');
+              fs.writeFileSync(resolvedPath, Buffer.from(base64, 'base64'));
+            } else {
+              fs.writeFileSync(resolvedPath, result.data as string, 'utf8');
+            }
+            res.json({ success: true, path: resolvedPath });
+          } catch (writeErr) {
+            res.status(500).json({ success: false, error: `Failed to write file: ${(writeErr as Error).message}` });
+          }
+        } else {
+          res.json({
+            success: true,
+            format: result.format,
+            data: result.data
+          });
+        }
       })
       .catch(error => {
         res.status(500).json({
