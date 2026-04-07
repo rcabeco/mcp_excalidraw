@@ -1276,11 +1276,16 @@ app.get('/api/libraries', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Library index not found. Run the download script first.' });
     }
     const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    // Ensure every entry has an id (older entries lack it — derive from source path)
+    const normalised = index.map((lib: Record<string, unknown>) => ({
+      ...lib,
+      id: lib.id ?? (lib.source as string).replace(/[/.]/g, '-')
+    }));
     const q = (req.query.q as string | undefined)?.toLowerCase();
     const filtered = q
-      ? index.filter((lib: { name: string; description: string }) =>
+      ? normalised.filter((lib: { name: string; description: string }) =>
           lib.name.toLowerCase().includes(q) || lib.description.toLowerCase().includes(q))
-      : index;
+      : normalised;
     res.json({ success: true, count: filtered.length, libraries: filtered });
   } catch (err) {
     res.status(500).json({ success: false, error: (err as Error).message });
@@ -1295,7 +1300,10 @@ app.get('/api/libraries/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: 'Library index not found.' });
     }
     const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-    const lib = index.find((l: { id: string }) => l.id === req.params.id);
+    const reqId = req.params.id;
+    const lib = index.find((l: Record<string, unknown>) =>
+      l.id === reqId || (l.source as string).replace(/[/.]/g, '-') === reqId
+    );
     if (!lib) {
       return res.status(404).json({ success: false, error: `Library "${req.params.id}" not found.` });
     }
@@ -1304,7 +1312,12 @@ app.get('/api/libraries/:id', (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: `Library file not found at ${lib.source}` });
     }
     const libData = JSON.parse(fs.readFileSync(libPath, 'utf8'));
-    res.json({ success: true, library: { ...lib, items: libData.libraryItems ?? [] } });
+    // v1 uses `library` (array of element arrays), v2 uses `libraryItems` (array of {id,elements,...})
+    const rawItems: unknown[] = libData.libraryItems ?? libData.library ?? [];
+    const items = rawItems.map((item: unknown) =>
+      Array.isArray(item) ? { elements: item } : item
+    );
+    res.json({ success: true, library: { ...lib, items } });
   } catch (err) {
     res.status(500).json({ success: false, error: (err as Error).message });
   }
