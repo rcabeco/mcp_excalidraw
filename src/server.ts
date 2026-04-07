@@ -728,7 +728,8 @@ const pendingExports = new Map<string, PendingExport>();
 
 app.post('/api/export/image', (req: Request, res: Response) => {
   try {
-    const { format, background } = req.body;
+    const { format, background, scale } = req.body;
+    const exportScale = typeof scale === 'number' && [1, 2, 4, 8].includes(scale) ? scale : 1;
 
     if (!format || !['png', 'svg'].includes(format)) {
       return res.status(400).json({
@@ -918,6 +919,85 @@ app.post('/api/viewport/result', (req: Request, res: Response) => {
       success: false,
       error: (error as Error).message
     });
+  }
+});
+
+// Composition metrics — element density, color distribution, coverage
+app.get('/api/composition/metrics', (req: Request, res: Response) => {
+  try {
+    const all = Array.from(elements.values()).filter(e => !e.isDeleted);
+
+    if (all.length === 0) {
+      return res.json({
+        success: true,
+        bounding_box: { x: 0, y: 0, width: 0, height: 0 },
+        element_density_grid: [[0,0,0],[0,0,0],[0,0,0]],
+        color_distribution: [],
+        type_breakdown: {},
+        coverage_ratio: 0,
+        total_elements: 0
+      });
+    }
+
+    // Bounding box
+    const xs = all.flatMap(e => [e.x, e.x + (e.width ?? 0)]);
+    const ys = all.flatMap(e => [e.y, e.y + (e.height ?? 0)]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const bbW = maxX - minX || 1;
+    const bbH = maxY - minY || 1;
+
+    // 3x3 density grid (rule-of-thirds regions)
+    const grid: number[][] = [[0,0,0],[0,0,0],[0,0,0]];
+    for (const el of all) {
+      const cx = el.x + (el.width ?? 0) / 2;
+      const cy = el.y + (el.height ?? 0) / 2;
+      const col = Math.min(2, Math.floor(((cx - minX) / bbW) * 3));
+      const row = Math.min(2, Math.floor(((cy - minY) / bbH) * 3));
+      grid[row]![col]!++;
+    }
+
+    // Color distribution
+    const colorCounts = new Map<string, number>();
+    for (const el of all) {
+      const c = el.strokeColor ?? el.backgroundColor;
+      if (c && c !== 'transparent') {
+        colorCounts.set(c, (colorCounts.get(c) ?? 0) + 1);
+      }
+    }
+    const totalColoredEls = Array.from(colorCounts.values()).reduce((a, b) => a + b, 0) || 1;
+    const color_distribution = Array.from(colorCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([color, count]) => ({
+        color,
+        count,
+        percentage: Math.round((count / totalColoredEls) * 100)
+      }));
+
+    // Type breakdown
+    const type_breakdown: Record<string, number> = {};
+    for (const el of all) {
+      type_breakdown[el.type] = (type_breakdown[el.type] ?? 0) + 1;
+    }
+
+    // Coverage ratio: sum of element areas / bounding box area
+    const totalArea = all.reduce((sum, el) => sum + (el.width ?? 20) * (el.height ?? 20), 0);
+    const bbArea = bbW * bbH || 1;
+    const coverage_ratio = Math.min(1, totalArea / bbArea);
+
+    res.json({
+      success: true,
+      bounding_box: { x: minX, y: minY, width: bbW, height: bbH },
+      element_density_grid: grid,
+      color_distribution,
+      type_breakdown,
+      coverage_ratio: Math.round(coverage_ratio * 100) / 100,
+      total_elements: all.length
+    });
+  } catch (error) {
+    logger.error('Error computing composition metrics:', error);
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
