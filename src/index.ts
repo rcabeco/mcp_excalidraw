@@ -271,6 +271,7 @@ function buildZones(type: DrawingType, w: number, h: number): CompositionZone[] 
       { name: 'legend', x: Math.round(w * 0.8), y: 0, width: Math.round(w * 0.2), height: Math.round(h * 0.5), densityTarget: { min: 3, max: 8 } },
       { name: 'title', x: 0, y: Math.round(h * 0.9), width: w, height: Math.round(h * 0.1), densityTarget: { min: 1, max: 2 } }
     ];
+    default: throw new Error(`Unknown drawing type: ${type}`);
   }
 }
 
