@@ -1265,6 +1265,51 @@ app.get('/', (req: Request, res: Response) => {
   });
 });
 
+// ── Local library cache ──────────────────────────────────────────────────────
+const LIBRARIES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'libraries');
+
+// GET /api/libraries — list all available local libraries
+app.get('/api/libraries', (req: Request, res: Response) => {
+  try {
+    const indexPath = path.join(LIBRARIES_DIR, '_index.json');
+    if (!fs.existsSync(indexPath)) {
+      return res.status(404).json({ success: false, error: 'Library index not found. Run the download script first.' });
+    }
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    const q = (req.query.q as string | undefined)?.toLowerCase();
+    const filtered = q
+      ? index.filter((lib: { name: string; description: string }) =>
+          lib.name.toLowerCase().includes(q) || lib.description.toLowerCase().includes(q))
+      : index;
+    res.json({ success: true, count: filtered.length, libraries: filtered });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err as Error).message });
+  }
+});
+
+// GET /api/libraries/:id — get library items by id (loads the .excalidrawlib file)
+app.get('/api/libraries/:id', (req: Request, res: Response) => {
+  try {
+    const indexPath = path.join(LIBRARIES_DIR, '_index.json');
+    if (!fs.existsSync(indexPath)) {
+      return res.status(404).json({ success: false, error: 'Library index not found.' });
+    }
+    const index = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+    const lib = index.find((l: { id: string }) => l.id === req.params.id);
+    if (!lib) {
+      return res.status(404).json({ success: false, error: `Library "${req.params.id}" not found.` });
+    }
+    const libPath = path.join(LIBRARIES_DIR, lib.source);
+    if (!fs.existsSync(libPath)) {
+      return res.status(404).json({ success: false, error: `Library file not found at ${lib.source}` });
+    }
+    const libData = JSON.parse(fs.readFileSync(libPath, 'utf8'));
+    res.json({ success: true, library: { ...lib, items: libData.libraryItems ?? [] } });
+  } catch (err) {
+    res.status(500).json({ success: false, error: (err as Error).message });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req: Request, res: Response) => {
   res.json({

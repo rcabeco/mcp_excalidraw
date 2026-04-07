@@ -910,6 +910,30 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'list_libraries',
+    description: 'Search the local Excalidraw library cache (229 community libraries). Returns library names, IDs, and descriptions. Use the ID with load_library to add shapes to the canvas.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Optional search term to filter by name or description' }
+      }
+    }
+  },
+  {
+    name: 'load_library',
+    description: 'Load a library from the local cache onto the canvas. Extracts all shapes from the library and adds them at the specified position.',
+    inputSchema: {
+      type: 'object',
+      required: ['library_id'],
+      properties: {
+        library_id: { type: 'string', description: 'Library ID from list_libraries' },
+        x: { type: 'number', description: 'Top-left x offset for placing items (default: 0)' },
+        y: { type: 'number', description: 'Top-left y offset for placing items (default: 0)' },
+        clear_first: { type: 'boolean', description: 'Clear canvas before loading (default: false)' }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -2663,6 +2687,75 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           content: [{
             type: 'text',
             text: JSON.stringify({ deleted, group_id: cgArgs.group_id })
+          }]
+        };
+      }
+
+      case 'list_libraries': {
+        const llArgs = request.params.arguments as { query?: string };
+        const llResp = await fetch(
+          `${EXPRESS_SERVER_URL}/api/libraries${llArgs.query ? `?q=${encodeURIComponent(llArgs.query)}` : ''}`
+        );
+        if (!llResp.ok) throw new Error(`Failed to fetch libraries: ${llResp.status}`);
+        const llData = await llResp.json() as { count: number; libraries: Array<{ id: string; name: string; description: string; authors: Array<{ name: string }> }> };
+        const summary = llData.libraries.map(l =>
+          `[${l.id}] ${l.name} — ${l.description} (by ${l.authors.map(a => a.name).join(', ')})`
+        ).join('\n');
+        return {
+          content: [{
+            type: 'text',
+            text: `Found ${llData.count} libraries${llArgs.query ? ` matching "${llArgs.query}"` : ''}:\n\n${summary}`
+          }]
+        };
+      }
+
+      case 'load_library': {
+        const loadArgs = request.params.arguments as { library_id: string; x?: number; y?: number; clear_first?: boolean };
+        const libResp = await fetch(`${EXPRESS_SERVER_URL}/api/libraries/${loadArgs.library_id}`);
+        if (!libResp.ok) {
+          const errText = await libResp.text();
+          throw new Error(`Library not found: ${errText}`);
+        }
+        const libData = await libResp.json() as {
+          library: { name: string; items: Array<{ elements: Array<{ x?: number; y?: number; [key: string]: unknown }> }> }
+        };
+        const lib = libData.library;
+
+        // Flatten all elements from all library items, applying x/y offset
+        const offsetX = loadArgs.x ?? 0;
+        const offsetY = loadArgs.y ?? 0;
+        const allElements = lib.items.flatMap(item =>
+          (item.elements ?? []).map(el => ({
+            ...el,
+            x: (el.x ?? 0) + offsetX,
+            y: (el.y ?? 0) + offsetY
+          }))
+        );
+
+        if (loadArgs.clear_first) {
+          const clearResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/clear`, { method: 'DELETE' });
+          if (!clearResp.ok) throw new Error(`Canvas clear failed: ${clearResp.status}`);
+        }
+
+        if (allElements.length === 0) {
+          return { content: [{ type: 'text', text: `Library "${lib.name}" has no elements.` }] };
+        }
+
+        const batchResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ elements: allElements })
+        });
+        if (!batchResp.ok) {
+          const errText = await batchResp.text();
+          throw new Error(`Batch POST failed: ${batchResp.status} ${errText}`);
+        }
+        const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
+        const ids = (batchData.elements ?? []).map(e => e.id);
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ loaded: ids.length, library: lib.name, element_ids: ids })
           }]
         };
       }
