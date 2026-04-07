@@ -11,6 +11,8 @@ Two modes are available. Try MCP first — it has more capabilities.
 
 **MCP mode** (preferred): If `excalidraw/batch_create_elements` and other `excalidraw/*` tools appear in your tool list, use them directly. MCP tools handle label and arrow binding format automatically.
 
+> **Important:** MCP tools (`batch_create_elements`, `create_element`, etc.) write to the MCP's internal store, NOT the live browser canvas at localhost:4321. To push elements to the visible canvas, either use `draw_to_canvas` (MCP) or POST directly to `POST /api/elements/batch` (REST). See Step 0 mode note above.
+
 **REST API mode** (fallback): If MCP tools aren't available, use HTTP endpoints at `http://localhost:4321`. See the cheatsheet for REST payloads.
 
 **Neither works?** Start the server: `cd ~/.local/share/mcp-excalidraw && PORT=4321 node dist/server.js &`
@@ -193,14 +195,14 @@ If you find any issue: **stop, fix it, re-screenshot, then continue.** Say "I se
 ### REST API Mode
 
 1. Plan your coordinate grid first.
-2. Optional: `curl -X DELETE http://localhost:3000/api/elements/clear`
+2. Optional: `curl -X DELETE http://localhost:4321/api/elements/clear`
 3. Create elements using `POST /api/elements/batch`. Use `"label": {"text": "..."}` for labels.
 4. Bind arrows with `"start": {"id": "..."}` / `"end": {"id": "..."}`.
 5. Verify with `POST /api/export/image` → save PNG → run Quality Checklist.
 
 **REST API element + arrow example:**
 ```bash
-curl -X POST http://localhost:3000/api/elements/batch \
+curl -X POST http://localhost:4321/api/elements/batch \
   -H "Content-Type: application/json" \
   -d '{
     "elements": [
@@ -295,7 +297,7 @@ After conversion, call `set_viewport` with `scrollToContent: true` and `get_canv
 
 **REST mode:**
 ```bash
-curl -X POST http://localhost:3000/api/elements/from-mermaid \
+curl -X POST http://localhost:4321/api/elements/from-mermaid \
   -H "Content-Type: application/json" \
   -d '{"mermaid": "graph TD\n  A --> B\n  B --> C"}'
 ```
@@ -344,6 +346,8 @@ curl -X POST http://localhost:3000/api/elements/from-mermaid \
 | Analyze quality | `analyze_composition` | `GET /api/composition/metrics` |
 | Apply style preset | `apply_style_preset` | — |
 | Simulate gradient | `simulate_gradient` | — |
+| Clear gradient | `clear_gradient` | — |
+| Push elements to canvas | `draw_to_canvas` | `POST /api/elements/batch` |
 | Suggest refinements | `suggest_refinements` | — |
 | Z-order elements | `layer` field on batch | `POST /api/elements/batch` (add `"layer": 0/1/2`) |
 | High-res export | `export_to_image` | `POST /api/export/image {"format":"png","scale":4}` |
