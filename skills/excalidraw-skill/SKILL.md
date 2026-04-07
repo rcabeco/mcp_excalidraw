@@ -1,6 +1,6 @@
 ---
 name: excalidraw-skill
-description: High-fidelity canvas drawing toolkit. Use for all Excalidraw drawing tasks. Enforces a 5-phase workflow (Plan→Sketch→Build→Detail→Finalize) that produces professional-quality output. Requires a running canvas server at EXPRESS_SERVER_URL (default http://localhost:3000/4321).
+description: High-fidelity canvas drawing toolkit. Use for all Excalidraw drawing tasks. Enforces a 5-phase workflow (Plan→Sketch→Build→Detail→Finalize) that produces professional-quality output. Requires a running canvas server at EXPRESS_SERVER_URL (default http://localhost:4321).
 ---
 
 # Excalidraw Drawing Skill — 5-Phase Workflow
