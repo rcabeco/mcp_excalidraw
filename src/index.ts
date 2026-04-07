@@ -2632,7 +2632,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       case 'draw_to_canvas': {
         const dtcArgs = request.params.arguments as { elements: unknown[]; clear_first?: boolean };
         if (dtcArgs.clear_first) {
-          await fetch(`${EXPRESS_SERVER_URL}/api/elements/clear`, { method: 'DELETE' });
+          const clearResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/clear`, { method: 'DELETE' });
+          if (!clearResp.ok) {
+            throw new Error(`Canvas clear failed: ${clearResp.status} ${clearResp.statusText}`);
+          }
         }
         const batchResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/batch`, {
           method: 'POST',
