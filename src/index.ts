@@ -28,6 +28,9 @@ import {
   validateElement,
   normalizeFontFamily
 } from './types.js';
+import type {
+  CompositionPlan, DrawingType, StylePreset, CompositionZone, ColorSlot
+} from './types.js';
 import fetch from 'node-fetch';
 
 // Load environment variables
@@ -195,6 +198,90 @@ const sceneState: SceneState = {
   viewport: { x: 0, y: 0, zoom: 1 },
   selectedElements: new Set(),
   groups: new Map()
+};
+
+const compositionPlans = new Map<string, CompositionPlan>();
+
+function evictStalePlans(): void {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, plan] of compositionPlans) {
+    if (plan.createdAt < cutoff) compositionPlans.delete(id);
+  }
+}
+
+const STYLE_PALETTES: Record<StylePreset, ColorSlot[]> = {
+  Sketchy: [
+    { slot: 'background', hex: '#fdf6e3' }, { slot: 'surface', hex: '#f5ebe0' },
+    { slot: 'primary', hex: '#8b5e3c' }, { slot: 'accent', hex: '#d4a76a' },
+    { slot: 'shadow', hex: '#6b4226' }, { slot: 'highlight', hex: '#f9c784' },
+    { slot: 'text', hex: '#3d2b1f' }
+  ],
+  Clean: [
+    { slot: 'background', hex: '#f8f9fa' }, { slot: 'surface', hex: '#ffffff' },
+    { slot: 'primary', hex: '#1971c2' }, { slot: 'accent', hex: '#4a9eff' },
+    { slot: 'shadow', hex: '#adb5bd' }, { slot: 'highlight', hex: '#e7f5ff' },
+    { slot: 'text', hex: '#212529' }
+  ],
+  Painted: [
+    { slot: 'background', hex: '#1a1a2e' }, { slot: 'surface', hex: '#16213e' },
+    { slot: 'primary', hex: '#e94560' }, { slot: 'accent', hex: '#f5a623' },
+    { slot: 'shadow', hex: '#0f3460' }, { slot: 'highlight', hex: '#ffd700' },
+    { slot: 'text', hex: '#eaeaea' }
+  ],
+  Technical: [
+    { slot: 'background', hex: '#ffffff' }, { slot: 'surface', hex: '#f1f3f5' },
+    { slot: 'primary', hex: '#1e1e1e' }, { slot: 'accent', hex: '#1971c2' },
+    { slot: 'shadow', hex: '#868e96' }, { slot: 'highlight', hex: '#e9ecef' },
+    { slot: 'text', hex: '#1e1e1e' }
+  ],
+  Isometric: [
+    { slot: 'background', hex: '#dfe9f3' }, { slot: 'surface', hex: '#c8d8e8' },
+    { slot: 'primary', hex: '#2c5f8a' }, { slot: 'accent', hex: '#5ba3d9' },
+    { slot: 'shadow', hex: '#1a3a55' }, { slot: 'highlight', hex: '#9ecfee' },
+    { slot: 'text', hex: '#1a2e3d' }
+  ]
+};
+
+function buildZones(type: DrawingType, w: number, h: number): CompositionZone[] {
+  switch (type) {
+    case 'arch': return [
+      { name: 'title-bar', x: 0, y: 0, width: w, height: 60, densityTarget: { min: 1, max: 3 } },
+      { name: 'legend', x: 0, y: 60, width: 160, height: h - 60, densityTarget: { min: 2, max: 6 } },
+      { name: 'main-grid', x: 160, y: 60, width: w - 160, height: h - 60, densityTarget: { min: 8, max: 20 } }
+    ];
+    case 'infographic': return [
+      { name: 'hero', x: 0, y: 0, width: w, height: Math.round(h * 0.3), densityTarget: { min: 2, max: 5 } },
+      { name: 'col-left', x: 0, y: Math.round(h * 0.3), width: Math.round(w / 3), height: Math.round(h * 0.6), densityTarget: { min: 3, max: 8 } },
+      { name: 'col-center', x: Math.round(w / 3), y: Math.round(h * 0.3), width: Math.round(w / 3), height: Math.round(h * 0.6), densityTarget: { min: 3, max: 8 } },
+      { name: 'col-right', x: Math.round(w * 2 / 3), y: Math.round(h * 0.3), width: Math.round(w / 3), height: Math.round(h * 0.6), densityTarget: { min: 3, max: 8 } },
+      { name: 'footer', x: 0, y: Math.round(h * 0.9), width: w, height: Math.round(h * 0.1), densityTarget: { min: 1, max: 3 } }
+    ];
+    case 'art': return [
+      { name: 'sky', x: 0, y: 0, width: w, height: Math.round(h * 0.35), densityTarget: { min: 10, max: 30 } },
+      { name: 'horizon', x: 0, y: Math.round(h * 0.35), width: w, height: Math.round(h * 0.15), densityTarget: { min: 5, max: 15 } },
+      { name: 'midground', x: 0, y: Math.round(h * 0.5), width: w, height: Math.round(h * 0.3), densityTarget: { min: 15, max: 40 } },
+      { name: 'foreground', x: 0, y: Math.round(h * 0.8), width: w, height: Math.round(h * 0.2), densityTarget: { min: 10, max: 25 } }
+    ];
+    case 'ui': return [
+      { name: 'nav', x: 0, y: 0, width: w, height: 48, densityTarget: { min: 3, max: 8 } },
+      { name: 'sidebar', x: 0, y: 48, width: Math.round(w * 0.2), height: h - 48, densityTarget: { min: 4, max: 12 } },
+      { name: 'content', x: Math.round(w * 0.2), y: 48, width: Math.round(w * 0.8), height: h - 48, densityTarget: { min: 6, max: 18 } }
+    ];
+    case 'map': return [
+      { name: 'main-area', x: 0, y: 0, width: Math.round(w * 0.8), height: Math.round(h * 0.9), densityTarget: { min: 8, max: 25 } },
+      { name: 'legend', x: Math.round(w * 0.8), y: 0, width: Math.round(w * 0.2), height: Math.round(h * 0.5), densityTarget: { min: 3, max: 8 } },
+      { name: 'title', x: 0, y: Math.round(h * 0.9), width: w, height: Math.round(h * 0.1), densityTarget: { min: 1, max: 2 } }
+    ];
+    default: throw new Error(`Unknown drawing type: ${type}`);
+  }
+}
+
+const TYPE_RULES: Record<DrawingType, string[]> = {
+  arch: ['visual-hierarchy', 'consistent-sizing', 'arrow-binding', 'zone-separation'],
+  infographic: ['rule-of-thirds', 'visual-hierarchy', 'color-harmony', 'gradient-hero'],
+  art: ['depth-layers', 'rule-of-thirds', 'color-harmony', 'texture-variation', 'negative-space'],
+  ui: ['alignment-grid', 'consistent-sizing', 'visual-hierarchy', 'negative-space'],
+  map: ['spatial-accuracy', 'consistent-sizing', 'legend-required', 'grid-snap']
 };
 
 // Points schema: accept both {x, y} objects and [x, y] tuples
@@ -711,6 +798,85 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'plan_composition',
+    description: 'Generate a structured canvas blueprint before drawing. Returns zones, color palette, drawing phases, and composition rules based on drawing type and style. ALWAYS call this before starting a new drawing — it is the entry point for the 5-phase drawing workflow.',
+    inputSchema: {
+      type: 'object',
+      required: ['description', 'drawing_type', 'style_preset'],
+      properties: {
+        description: { type: 'string', description: 'What to draw' },
+        drawing_type: { type: 'string', enum: ['arch', 'infographic', 'art', 'ui', 'map'] },
+        canvas_width: { type: 'number', description: 'Canvas width in pixels (default 1200)' },
+        canvas_height: { type: 'number', description: 'Canvas height in pixels (default 800)' },
+        style_preset: { type: 'string', enum: ['Sketchy', 'Clean', 'Painted', 'Technical', 'Isometric'] }
+      }
+    }
+  },
+  {
+    name: 'analyze_composition',
+    description: 'Score the current canvas against a composition plan. Returns a 0-100 quality score, balance metrics, per-zone density status, color adherence %, and a prioritized feedback list. Call after each drawing phase to track improvement.',
+    inputSchema: {
+      type: 'object',
+      required: ['plan_id'],
+      properties: {
+        plan_id: { type: 'string', description: 'planId returned by plan_composition' },
+        element_ids: { type: 'array', items: { type: 'string' }, description: 'Scope to a subset of elements (omit for full canvas)' }
+      }
+    }
+  },
+  {
+    name: 'apply_style_preset',
+    description: 'Bulk-apply a visual style preset to elements. Presets: Sketchy (rough hand-drawn), Clean (sharp minimal), Painted (textured variable-width), Technical (precise monochrome+accent), Isometric (30° grid). Use after Phase 3 BUILD to normalize visual style.',
+    inputSchema: {
+      type: 'object',
+      required: ['preset', 'element_ids'],
+      properties: {
+        preset: { type: 'string', enum: ['Sketchy', 'Clean', 'Painted', 'Technical', 'Isometric'] },
+        element_ids: {
+          oneOf: [
+            { type: 'array', items: { type: 'string' } },
+            { type: 'string', enum: ['all'] }
+          ],
+          description: 'Element IDs to apply preset to, or "all" for all canvas elements'
+        }
+      }
+    }
+  },
+  {
+    name: 'simulate_gradient',
+    description: 'Simulate a gradient fill in a zone using N overlapping rectangles with interpolated colors. Use for background zones, hero sections, or sky areas. Returns element IDs for grouping. 16 steps gives a smooth result for most sizes.',
+    inputSchema: {
+      type: 'object',
+      required: ['zone', 'color_start', 'color_end', 'direction'],
+      properties: {
+        zone: {
+          type: 'object',
+          required: ['x', 'y', 'width', 'height'],
+          properties: {
+            x: { type: 'number' }, y: { type: 'number' },
+            width: { type: 'number' }, height: { type: 'number' }
+          }
+        },
+        color_start: { type: 'string', description: 'Start hex color e.g. "#1a1a2e"' },
+        color_end: { type: 'string', description: 'End hex color e.g. "#e94560"' },
+        direction: { type: 'string', enum: ['horizontal', 'vertical', 'radial'] },
+        steps: { type: 'number', description: '8–32 steps (default 16)' }
+      }
+    }
+  },
+  {
+    name: 'suggest_refinements',
+    description: 'Run composition analysis and return an ordered action list to reach a target quality score. Actions are sorted by estimated impact. Work through them top-to-bottom until current_score + gains >= target_score.',
+    inputSchema: {
+      type: 'object',
+      required: ['plan_id'],
+      properties: {
+        plan_id: { type: 'string', description: 'planId returned by plan_composition' },
+        target_score: { type: 'number', description: 'Target quality score 0–100 (default 85)' }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -855,6 +1021,94 @@ function convertTextToLabel(element: ServerElement): ServerElement {
     } as ServerElement;
   }
   return element;
+}
+
+function interpolateHex(hexA: string, hexB: string, t: number): string {
+  const parse = (h: string): [number, number, number] => {
+    const c = h.replace('#', '');
+    return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)];
+  };
+  const [r1, g1, b1] = parse(hexA);
+  const [r2, g2, b2] = parse(hexB);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
+  score: number;
+  balance: { left_right_ratio: number; top_bottom_ratio: number };
+  density_report: Array<{ zone: string; current: number; target_min: number; target_max: number; status: string }>;
+  color_adherence: number;
+  feedback: Array<{ message: string; impact: string; zone?: string }>;
+}> {
+  const plan = compositionPlans.get(planId);
+  if (!plan) throw new Error(`Plan ${planId} not found. Call plan_composition first.`);
+
+  // Fetch metrics from canvas server
+  const metricsResp = await fetch(`${EXPRESS_SERVER_URL}/api/composition/metrics`);
+  if (!metricsResp.ok) throw new Error('Failed to fetch composition metrics from canvas server');
+  const metrics = await metricsResp.json() as Record<string, unknown>;
+
+  // Fetch all elements
+  const elemsResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+  if (!elemsResp.ok) throw new Error('Failed to fetch elements from canvas server');
+  const elemsData = await elemsResp.json() as { elements?: Record<string, unknown>[] };
+  let allElements: Record<string, unknown>[] = elemsData.elements ?? [];
+  if (elementIds && elementIds.length > 0) {
+    const idSet = new Set(elementIds);
+    allElements = allElements.filter((e) => idSet.has(e.id as string));
+  }
+
+  // Per-zone density
+  const density_report = plan.zones.map(zone => {
+    const inZone = allElements.filter((el) => {
+      const cx = (el.x as number) + ((el.width as number | undefined) ?? 0) / 2;
+      const cy = (el.y as number) + ((el.height as number | undefined) ?? 0) / 2;
+      return cx >= zone.x && cx <= zone.x + zone.width && cy >= zone.y && cy <= zone.y + zone.height;
+    });
+    const status = inZone.length < zone.densityTarget.min ? 'under'
+      : inZone.length > zone.densityTarget.max ? 'over' : 'good';
+    return { zone: zone.name, current: inZone.length, target_min: zone.densityTarget.min, target_max: zone.densityTarget.max, status };
+  });
+
+  // Color adherence
+  const paletteHexes = new Set(plan.colorPalette.map(c => c.hex.toLowerCase()));
+  const coloredEls = allElements.filter((el) => el.strokeColor || el.backgroundColor);
+  const adheringEls = coloredEls.filter((el) =>
+    paletteHexes.has(((el.strokeColor as string) ?? '').toLowerCase()) ||
+    paletteHexes.has(((el.backgroundColor as string) ?? '').toLowerCase())
+  );
+  const color_adherence = coloredEls.length > 0 ? Math.round((adheringEls.length / coloredEls.length) * 100) : 0;
+
+  // Balance from density grid
+  const grid = (metrics.element_density_grid as number[][]) ?? [[0,0,0],[0,0,0],[0,0,0]];
+  const leftWeight = grid.reduce((s, row) => s + row[0]! + row[1]!, 0);
+  const rightWeight = grid.reduce((s, row) => s + row[1]! + row[2]!, 0);
+  const topWeight = grid[0]!.reduce((a, b) => a + b, 0) + grid[1]!.reduce((a, b) => a + b, 0);
+  const bottomWeight = grid[1]!.reduce((a, b) => a + b, 0) + grid[2]!.reduce((a, b) => a + b, 0);
+  const left_right_ratio = rightWeight > 0 ? leftWeight / rightWeight : 1;
+  const top_bottom_ratio = bottomWeight > 0 ? topWeight / bottomWeight : 1;
+
+  // Scoring
+  const underZones = density_report.filter(z => z.status === 'under');
+  const densityScore = Math.max(0, 100 - underZones.length * 15);
+  const colorScore = color_adherence;
+  const balanceScore = Math.max(0, 100 - Math.abs(1 - left_right_ratio) * 30 - Math.abs(1 - top_bottom_ratio) * 20);
+  const score = Math.round((densityScore * 0.4) + (colorScore * 0.35) + (balanceScore * 0.25));
+
+  // Feedback
+  const feedback: Array<{ message: string; impact: string; zone?: string }> = [];
+  for (const z of underZones) {
+    feedback.push({ message: `Zone "${z.zone}" has ${z.current} elements but needs ${z.target_min}–${z.target_max}. Add ${z.target_min - z.current} more.`, impact: 'high', zone: z.zone });
+  }
+  if (color_adherence < 70) feedback.push({ message: `Only ${color_adherence}% of elements use palette colors. Apply the plan palette to more elements.`, impact: 'high' });
+  if (Math.abs(1 - left_right_ratio) > 0.4) feedback.push({ message: `Canvas is visually ${left_right_ratio > 1 ? 'left' : 'right'}-heavy. Add elements to the lighter side.`, impact: 'medium' });
+  const coverageRatio = (metrics.coverage_ratio as number | undefined) ?? 0;
+  if (coverageRatio < 0.3) feedback.push({ message: `Canvas coverage is only ${Math.round(coverageRatio * 100)}%. Spread elements further or add more.`, impact: 'medium' });
+
+  return { score, balance: { left_right_ratio, top_bottom_ratio }, density_report, color_adherence, feedback };
 }
 
 // Set up request handler for tool calls
@@ -1887,9 +2141,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       }
 
       case 'read_diagram_guide': {
-        return {
-          content: [{ type: 'text', text: DIAGRAM_DESIGN_GUIDE }]
-        };
+        // Load the rich drawing guide if available, fall back to legacy guide
+        const guidePath = path.join(path.dirname(fileURLToPath(import.meta.url)),
+          '../skills/excalidraw-skill/DRAWING_GUIDE.md');
+        let guideText = DIAGRAM_DESIGN_GUIDE; // legacy fallback
+        try {
+          guideText = fs.readFileSync(guidePath, 'utf8');
+        } catch {
+          logger.warn('DRAWING_GUIDE.md not found, using legacy guide');
+        }
+        return { content: [{ type: 'text', text: guideText }] };
       }
 
       case 'export_to_excalidraw_url': {
@@ -2210,6 +2471,203 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           content: [{
             type: 'text',
             text: `Viewport updated successfully.\n\n${JSON.stringify(viewportResult, null, 2)}`
+          }]
+        };
+      }
+
+      case 'plan_composition': {
+        evictStalePlans();
+        const pcArgs = request.params.arguments as {
+          description: string;
+          drawing_type: DrawingType;
+          canvas_width?: number;
+          canvas_height?: number;
+          style_preset: StylePreset;
+        };
+        const w = pcArgs.canvas_width ?? 1200;
+        const h = pcArgs.canvas_height ?? 800;
+        const zones = buildZones(pcArgs.drawing_type, w, h);
+        const plan: CompositionPlan = {
+          planId: generateId(),
+          drawingType: pcArgs.drawing_type,
+          canvasWidth: w,
+          canvasHeight: h,
+          stylePreset: pcArgs.style_preset,
+          zones,
+          colorPalette: STYLE_PALETTES[pcArgs.style_preset],
+          phases: zones.flatMap((zone) => [
+            { phase: 2, zone: zone.name, elementTypes: ['rectangle', 'text'] as ExcalidrawElementType[], targetCount: Math.ceil(zone.densityTarget.min * 0.2) },
+            { phase: 3, zone: zone.name, elementTypes: ['rectangle', 'ellipse', 'text', 'line', 'freedraw'] as ExcalidrawElementType[], targetCount: zone.densityTarget.min }
+          ]),
+          compositionRules: TYPE_RULES[pcArgs.drawing_type],
+          createdAt: Date.now()
+        };
+        compositionPlans.set(plan.planId, plan);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(plan, null, 2) }]
+        };
+      }
+
+      case 'analyze_composition': {
+        const acArgs = request.params.arguments as { plan_id: string; element_ids?: string[] };
+        const result = await runAnalysis(acArgs.plan_id, acArgs.element_ids);
+        return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      }
+
+      case 'apply_style_preset': {
+        const aspArgs = request.params.arguments as { preset: StylePreset; element_ids: string[] | 'all' };
+        const PRESET_PROPS: Record<StylePreset, (area: number) => Record<string, unknown>> = {
+          Sketchy:   () => ({ roughness: 2, strokeWidth: 2, fillStyle: 'hachure' }),
+          Clean:     () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' }),
+          Painted:   (area) => ({ roughness: 1, strokeWidth: Math.min(4, 1 + Math.floor(area / 10000)), fillStyle: area > 5000 ? 'cross-hatch' : 'solid' }),
+          Technical: () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' }),
+          Isometric: () => ({ roughness: 0, strokeWidth: 1, fillStyle: 'solid' })
+        };
+
+        let ids: string[];
+        if (aspArgs.element_ids === 'all') {
+          const allResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+          const allData = await allResp.json() as { elements?: Array<{ id: string }> };
+          ids = (allData.elements ?? []).map(e => e.id);
+        } else {
+          ids = aspArgs.element_ids;
+        }
+
+        let updated = 0;
+        for (const id of ids) {
+          const elResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`);
+          if (!elResp.ok) continue;
+          const elData = await elResp.json() as { element?: { width?: number; height?: number } };
+          const el = elData.element;
+          if (!el) continue;
+          const area = (el.width ?? 20) * (el.height ?? 20);
+          const props = PRESET_PROPS[aspArgs.preset](area);
+          const putResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, ...props })
+          });
+          if (!putResp.ok) continue;
+          updated++;
+        }
+
+        return { content: [{ type: 'text', text: `Applied "${aspArgs.preset}" preset to ${updated} elements.` }] };
+      }
+
+      case 'simulate_gradient': {
+        const sgArgs = request.params.arguments as {
+          zone: { x: number; y: number; width: number; height: number };
+          color_start: string;
+          color_end: string;
+          direction: 'horizontal' | 'vertical' | 'radial';
+          steps?: number;
+        };
+        const steps = Math.min(32, Math.max(8, sgArgs.steps ?? 16));
+        const { zone, color_start, color_end, direction } = sgArgs;
+        const gradientElements: Array<Record<string, unknown>> = [];
+
+        for (let i = 0; i < steps; i++) {
+          const t = i / (steps - 1);
+          const color = interpolateHex(color_start, color_end, t);
+          let x = zone.x, y = zone.y, w = zone.width, h = zone.height;
+
+          if (direction === 'horizontal') {
+            x = zone.x + (zone.width / steps) * i;
+            w = zone.width / steps + 1;
+          } else if (direction === 'vertical') {
+            y = zone.y + (zone.height / steps) * i;
+            h = zone.height / steps + 1;
+          } else {
+            // radial: concentric rectangles
+            const inset = (Math.min(zone.width, zone.height) / 2) * t;
+            x = zone.x + inset;
+            y = zone.y + inset;
+            w = Math.max(1, zone.width - inset * 2);
+            h = Math.max(1, zone.height - inset * 2);
+          }
+
+          gradientElements.push({
+            type: 'rectangle', x, y, width: w, height: h,
+            backgroundColor: color,
+            strokeColor: 'transparent',
+            strokeWidth: 0,
+            fillStyle: 'solid',
+            roughness: 0,
+            opacity: Math.round(85 - t * 15),
+            layer: 0
+          });
+        }
+
+        const batchResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ elements: gradientElements })
+        });
+        if (!batchResp.ok) throw new Error(`Batch POST failed: ${batchResp.status} ${batchResp.statusText}`);
+        const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
+        const ids = (batchData.elements ?? []).map(e => e.id);
+        return { content: [{ type: 'text', text: `Created ${ids.length} gradient elements. IDs: ${ids.join(', ')}` }] };
+      }
+
+      case 'suggest_refinements': {
+        const srArgs = request.params.arguments as { plan_id: string; target_score?: number };
+        const target = srArgs.target_score ?? 85;
+        const plan = compositionPlans.get(srArgs.plan_id);
+        if (!plan) throw new Error(`Plan ${srArgs.plan_id} not found. Call plan_composition first.`);
+        const analysis = await runAnalysis(srArgs.plan_id);
+
+        const actions: Array<{ description: string; tool_call: string; impact: string; estimated_score_gain: number }> = [];
+
+        // Under-density zones → suggest adding elements
+        for (const z of analysis.density_report.filter(z => z.status === 'under')) {
+          const needed = z.target_min - z.current;
+          const zoneObj = plan.zones.find(pz => pz.name === z.zone);
+          if (zoneObj) {
+            actions.push({
+              description: `Add ${needed} elements to zone "${z.zone}" (currently ${z.current}/${z.target_min} minimum)`,
+              tool_call: `batch_create_elements with ${needed} elements positioned inside zone: x=${zoneObj.x}–${zoneObj.x + zoneObj.width}, y=${zoneObj.y}–${zoneObj.y + zoneObj.height}`,
+              impact: 'high',
+              estimated_score_gain: Math.min(15, needed * 3)
+            });
+          }
+        }
+
+        // Color adherence
+        if (analysis.color_adherence < 70) {
+          actions.push({
+            description: `Improve palette adherence from ${analysis.color_adherence}% to 80%+ by updating element colors to palette slots`,
+            tool_call: `Use update_element on off-palette elements to set strokeColor/backgroundColor to palette hex values: ${plan.colorPalette.map(c => `${c.slot}=${c.hex}`).join(', ')}`,
+            impact: 'high',
+            estimated_score_gain: 12
+          });
+        }
+
+        // Balance
+        if (Math.abs(1 - analysis.balance.left_right_ratio) > 0.4) {
+          const side = analysis.balance.left_right_ratio > 1 ? 'right' : 'left';
+          actions.push({
+            description: `Canvas is visually unbalanced — add elements to the ${side} side`,
+            tool_call: `batch_create_elements with 2–3 decorative elements on the ${side} half of the canvas`,
+            impact: 'medium',
+            estimated_score_gain: 8
+          });
+        }
+
+        // Apply style preset
+        actions.push({
+          description: `Apply "${plan.stylePreset}" style preset to normalize all elements`,
+          tool_call: `apply_style_preset with preset="${plan.stylePreset}" and element_ids="all"`,
+          impact: analysis.score < 60 ? 'high' : 'medium',
+          estimated_score_gain: 5
+        });
+
+        // Sort by estimated gain descending
+        actions.sort((a, b) => b.estimated_score_gain - a.estimated_score_gain);
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ current_score: analysis.score, target_score: target, actions }, null, 2)
           }]
         };
       }

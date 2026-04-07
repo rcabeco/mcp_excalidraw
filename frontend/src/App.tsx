@@ -65,6 +65,17 @@ interface WebSocketMessage {
   source?: string;
   mermaidDiagram?: string;
   config?: MermaidConfig;
+  // export
+  requestId?: string;
+  format?: string;
+  background?: boolean;
+  scale?: number;
+  // viewport / scroll
+  scrollToContent?: boolean;
+  scrollToElementId?: string;
+  zoom?: number;
+  offsetX?: number;
+  offsetY?: number;
 }
 
 interface ApiResponse {
@@ -533,7 +544,8 @@ function App(): JSX.Element {
                     exportBackground: data.background !== false
                   },
                   files,
-                  mimeType: 'image/png'
+                  mimeType: 'image/png',
+                  scale: typeof data.scale === 'number' ? data.scale : 1
                 })
                 const reader = new FileReader()
                 reader.onload = async () => {

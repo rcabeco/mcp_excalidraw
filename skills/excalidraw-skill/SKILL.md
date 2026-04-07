@@ -1,9 +1,9 @@
 ---
 name: excalidraw-skill
-description: Programmatic canvas toolkit for creating, editing, and refining Excalidraw diagrams via MCP tools with real-time canvas sync. Use when an agent needs to (1) draw or lay out diagrams on a live canvas, (2) iteratively refine diagrams using describe_scene and get_canvas_screenshot to see its own work, (3) export/import .excalidraw files or PNG/SVG images, (4) save/restore canvas snapshots, (5) convert Mermaid to Excalidraw, or (6) perform element-level CRUD, alignment, distribution, grouping, duplication, and locking. Requires a running canvas server (EXPRESS_SERVER_URL, default http://localhost:3000).
+description: High-fidelity canvas drawing toolkit. Use for all Excalidraw drawing tasks. Enforces a 5-phase workflow (Plan→Sketch→Build→Detail→Finalize) that produces professional-quality output. Requires a running canvas server at EXPRESS_SERVER_URL (default http://localhost:4321).
 ---
 
-# Excalidraw Skill
+# Excalidraw Drawing Skill — 5-Phase Workflow
 
 ## Step 0: Determine Connection Mode
 
@@ -11,18 +11,52 @@ Two modes are available. Try MCP first — it has more capabilities.
 
 **MCP mode** (preferred): If `excalidraw/batch_create_elements` and other `excalidraw/*` tools appear in your tool list, use them directly. MCP tools handle label and arrow binding format automatically.
 
-**REST API mode** (fallback): If MCP tools aren't available, use HTTP endpoints at `http://localhost:3000`. See the cheatsheet for REST payloads. Note the format differences in the table below — REST and MCP accept slightly different field names.
+**REST API mode** (fallback): If MCP tools aren't available, use HTTP endpoints at `http://localhost:4321`. See the cheatsheet for REST payloads.
 
-**Neither works?** Tell the user:
-> The Excalidraw canvas server is not running. To set up:
-> 1. `git clone https://github.com/yctimlin/mcp_excalidraw && cd mcp_excalidraw`
-> 2. `npm ci && npm run build`
-> 3. `PORT=3000 npm run canvas`
-> 4. Open `http://localhost:3000` in a browser
-> 5. (Recommended) Install the MCP server:
->    `claude mcp add excalidraw -s user -e EXPRESS_SERVER_URL=http://localhost:3000 -- node /path/to/mcp_excalidraw/dist/index.js`
+**Neither works?** Start the server: `cd ~/.local/share/mcp-excalidraw && PORT=4321 node dist/server.js &`
+Then verify: `curl -s http://localhost:4321/health` — should contain `"status":"healthy"`.
 
-### MCP vs REST API Quick Reference
+## The 5-Phase Drawing Session (High-Fidelity Mode)
+
+**This is a RIGID workflow for high-fidelity drawings. Phases are not optional. Do not skip exit gates.**
+
+For simple diagrams, you may skip to the [Quick Reference](#quick-reference) section and draw directly.
+
+### Phase 1 — PLAN
+1. Call `read_diagram_guide` — load color and composition rules
+2. Call `plan_composition` with `description`, `drawing_type` (arch|infographic|art|ui|map), `canvas_width`/`canvas_height` (default 1200×800), `style_preset` (Sketchy|Clean|Painted|Technical|Isometric)
+3. Output the full blueprint JSON to the conversation
+4. **EXIT GATE: blueprint confirmed before any elements are created**
+
+### Phase 2 — SKETCH
+1. Clear canvas, draw structural anchors only (zone boundaries, major shapes, key labels) with `layer: 0`
+2. Target 10–20% of final element count — skeleton only
+3. Call `get_canvas_screenshot` to verify zone coverage
+4. **EXIT GATE: all major zones visible in screenshot**
+
+### Phase 3 — BUILD
+1. Fill each zone to `densityTarget.min` with `layer: 1` content / `layer: 2` highlights
+2. Use only blueprint palette colors; call `simulate_gradient` for background zones
+3. Call `apply_style_preset` with the blueprint's `stylePreset` and `element_ids: "all"`
+4. **EXIT GATE: all zones at ≥ 80% of densityTarget.min**
+
+### Phase 4 — DETAIL
+1. Call `analyze_composition` — read score and feedback
+2. Work through feedback top-to-bottom; add shadows (15–25% opacity), texture freedraw, highlights
+3. Re-call `analyze_composition` after each major change
+4. **EXIT GATE: composition score ≥ 75**
+
+### Phase 5 — FINALIZE
+1. Call `suggest_refinements` with `target_score: 85` — work through returned actions
+2. Call `set_viewport scrollToContent`, take screenshot, export `POST /api/export/image {"format":"png","scale":4}`
+3. Call `snapshot_scene` to save a restore point
+4. **EXIT GATE: score ≥ 85, screenshot shown, export path returned**
+
+**Mid-session changes:** re-enter at appropriate phase (color change → Phase 3, layout change → Phase 2).
+
+---
+
+## Quick Reference
 
 | Operation | MCP Tool | REST API Equivalent |
 |-----------|----------|-------------------|
@@ -301,3 +335,16 @@ curl -X POST http://localhost:3000/api/elements/from-mermaid \
 ## References
 
 - `references/cheatsheet.md`: Complete MCP tool list (26 tools) + REST API endpoints + payload shapes.
+
+### High-Fidelity Drawing Tools (New)
+
+| Operation | MCP Tool | REST API |
+|-----------|----------|----------|
+| Plan composition | `plan_composition` | — |
+| Analyze quality | `analyze_composition` | `GET /api/composition/metrics` |
+| Apply style preset | `apply_style_preset` | — |
+| Simulate gradient | `simulate_gradient` | — |
+| Suggest refinements | `suggest_refinements` | — |
+| Z-order elements | `layer` field on batch | `POST /api/elements/batch` (add `"layer": 0/1/2`) |
+| High-res export | `export_to_image` | `POST /api/export/image {"format":"png","scale":4}` |
+| Drawing guide | `read_diagram_guide` | — |

@@ -141,6 +141,51 @@ export interface ServerElement extends Omit<ExcalidrawElementBase, 'id'> {
   // Arrow element binding: connect arrows to shapes by element ID
   start?: { id: string };
   end?: { id: string };
+  layer?: number; // z-order hint: 0=background, 1=midground, 2=foreground. Lower = rendered behind.
+}
+
+// Composition planning types
+export type DrawingType = 'arch' | 'infographic' | 'art' | 'ui' | 'map';
+export type StylePreset = 'Sketchy' | 'Clean' | 'Painted' | 'Technical' | 'Isometric';
+export type ColorSlotName = 'background' | 'surface' | 'primary' | 'accent' | 'shadow' | 'highlight' | 'text';
+
+export interface ColorSlot {
+  slot: ColorSlotName;
+  hex: string;
+}
+
+export interface DensityTarget {
+  min: number;
+  max: number;
+}
+
+export interface CompositionZone {
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  densityTarget: DensityTarget;
+}
+
+export interface CompositionPhase {
+  phase: number;
+  zone: string;
+  elementTypes: ExcalidrawElementType[];
+  targetCount: number;
+}
+
+export interface CompositionPlan {
+  planId: string;
+  drawingType: DrawingType;
+  canvasWidth: number;
+  canvasHeight: number;
+  stylePreset: StylePreset;
+  zones: CompositionZone[];
+  colorPalette: ColorSlot[];
+  phases: CompositionPhase[];
+  compositionRules: string[];
+  createdAt: number; // Date.now()
 }
 
 // API Response types
