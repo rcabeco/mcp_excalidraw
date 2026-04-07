@@ -1040,6 +1040,7 @@ async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
 
   // Fetch all elements
   const elemsResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements`);
+  if (!elemsResp.ok) throw new Error('Failed to fetch elements from canvas server');
   const elemsData = await elemsResp.json() as { elements?: Record<string, unknown>[] };
   let allElements: Record<string, unknown>[] = elemsData.elements ?? [];
   if (elementIds && elementIds.length > 0) {
@@ -1050,8 +1051,8 @@ async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
   // Per-zone density
   const density_report = plan.zones.map(zone => {
     const inZone = allElements.filter((el) => {
-      const cx = (el.x as number) + ((el.width as number) ?? 0) / 2;
-      const cy = (el.y as number) + ((el.height as number) ?? 0) / 2;
+      const cx = (el.x as number) + ((el.width as number | undefined) ?? 0) / 2;
+      const cy = (el.y as number) + ((el.height as number | undefined) ?? 0) / 2;
       return cx >= zone.x && cx <= zone.x + zone.width && cy >= zone.y && cy <= zone.y + zone.height;
     });
     const status = inZone.length < zone.densityTarget.min ? 'under'
@@ -1091,7 +1092,8 @@ async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
   }
   if (color_adherence < 70) feedback.push({ message: `Only ${color_adherence}% of elements use palette colors. Apply the plan palette to more elements.`, impact: 'high' });
   if (Math.abs(1 - left_right_ratio) > 0.4) feedback.push({ message: `Canvas is visually ${left_right_ratio > 1 ? 'left' : 'right'}-heavy. Add elements to the lighter side.`, impact: 'medium' });
-  if ((metrics.coverage_ratio as number) < 0.3) feedback.push({ message: `Canvas coverage is only ${Math.round((metrics.coverage_ratio as number) * 100)}%. Spread elements further or add more.`, impact: 'medium' });
+  const coverageRatio = (metrics.coverage_ratio as number | undefined) ?? 0;
+  if (coverageRatio < 0.3) feedback.push({ message: `Canvas coverage is only ${Math.round(coverageRatio * 100)}%. Spread elements further or add more.`, impact: 'medium' });
 
   return { score, balance: { left_right_ratio, top_bottom_ratio }, density_report, color_adherence, feedback };
 }
@@ -2484,11 +2486,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
           if (!el) continue;
           const area = (el.width ?? 20) * (el.height ?? 20);
           const props = PRESET_PROPS[aspArgs.preset](area);
-          await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`, {
+          const putResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/${id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ id, ...props })
           });
+          if (!putResp.ok) continue;
           updated++;
         }
 
