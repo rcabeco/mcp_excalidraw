@@ -2568,9 +2568,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
       case 'suggest_refinements': {
         const srArgs = request.params.arguments as { plan_id: string; target_score?: number };
         const target = srArgs.target_score ?? 85;
-        const analysis = await runAnalysis(srArgs.plan_id);
         const plan = compositionPlans.get(srArgs.plan_id);
         if (!plan) throw new Error(`Plan ${srArgs.plan_id} not found. Call plan_composition first.`);
+        const analysis = await runAnalysis(srArgs.plan_id);
 
         const actions: Array<{ description: string; tool_call: string; impact: string; estimated_score_gain: number }> = [];
 
