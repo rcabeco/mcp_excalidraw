@@ -1116,14 +1116,13 @@ async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
   const densityScore = Math.max(0, 100 - underZones.length * 15);
   const colorScore = color_adherence;
   const balanceScore = Math.max(0, 100 - Math.abs(1 - left_right_ratio) * 30 - Math.abs(1 - top_bottom_ratio) * 20);
-  const score = Math.round((densityScore * 0.4) + (colorScore * 0.35) + (balanceScore * 0.25));
+  const score = Math.round((densityScore * 0.5) + (balanceScore * 0.5));
 
   // Feedback
   const feedback: Array<{ message: string; impact: string; zone?: string }> = [];
   for (const z of underZones) {
     feedback.push({ message: `Zone "${z.zone}" has ${z.current} elements but needs ${z.target_min}–${z.target_max}. Add ${z.target_min - z.current} more.`, impact: 'high', zone: z.zone });
   }
-  if (color_adherence < 70) feedback.push({ message: `Only ${color_adherence}% of elements use palette colors. Apply the plan palette to more elements.`, impact: 'high' });
   if (Math.abs(1 - left_right_ratio) > 0.4) feedback.push({ message: `Canvas is visually ${left_right_ratio > 1 ? 'left' : 'right'}-heavy. Add elements to the lighter side.`, impact: 'medium' });
   const coverageRatio = (metrics.coverage_ratio as number | undefined) ?? 0;
   if (coverageRatio < 0.3) feedback.push({ message: `Canvas coverage is only ${Math.round(coverageRatio * 100)}%. Spread elements further or add more.`, impact: 'medium' });
@@ -2675,16 +2674,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
               estimated_score_gain: Math.min(15, needed * 3)
             });
           }
-        }
-
-        // Color adherence
-        if (analysis.color_adherence < 70) {
-          actions.push({
-            description: `Improve palette adherence from ${analysis.color_adherence}% to 80%+ by updating element colors to palette slots`,
-            tool_call: `Use update_element on off-palette elements to set strokeColor/backgroundColor to palette hex values: ${plan.colorPalette.map(c => `${c.slot}=${c.hex}`).join(', ')}`,
-            impact: 'high',
-            estimated_score_gain: 12
-          });
         }
 
         // Balance
