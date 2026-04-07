@@ -842,6 +842,28 @@ const tools: Tool[] = [
     }
   },
   {
+    name: 'simulate_gradient',
+    description: 'Simulate a gradient fill in a zone using N overlapping rectangles with interpolated colors. Use for background zones, hero sections, or sky areas. Returns element IDs for grouping. 16 steps gives a smooth result for most sizes.',
+    inputSchema: {
+      type: 'object',
+      required: ['zone', 'color_start', 'color_end', 'direction'],
+      properties: {
+        zone: {
+          type: 'object',
+          required: ['x', 'y', 'width', 'height'],
+          properties: {
+            x: { type: 'number' }, y: { type: 'number' },
+            width: { type: 'number' }, height: { type: 'number' }
+          }
+        },
+        color_start: { type: 'string', description: 'Start hex color e.g. "#1a1a2e"' },
+        color_end: { type: 'string', description: 'End hex color e.g. "#e94560"' },
+        direction: { type: 'string', enum: ['horizontal', 'vertical', 'radial'] },
+        steps: { type: 'number', description: '8–32 steps (default 16)' }
+      }
+    }
+  },
+  {
     name: 'duplicate_elements',
     description: 'Duplicate elements with a configurable offset',
     inputSchema: {
@@ -986,6 +1008,19 @@ function convertTextToLabel(element: ServerElement): ServerElement {
     } as ServerElement;
   }
   return element;
+}
+
+function interpolateHex(hexA: string, hexB: string, t: number): string {
+  const parse = (h: string): [number, number, number] => {
+    const c = h.replace('#', '');
+    return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)];
+  };
+  const [r1, g1, b1] = parse(hexA);
+  const [r2, g2, b2] = parse(hexB);
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
 }
 
 async function runAnalysis(planId: string, elementIds?: string[]): Promise<{
@@ -2458,6 +2493,60 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
         }
 
         return { content: [{ type: 'text', text: `Applied "${aspArgs.preset}" preset to ${updated} elements.` }] };
+      }
+
+      case 'simulate_gradient': {
+        const sgArgs = request.params.arguments as {
+          zone: { x: number; y: number; width: number; height: number };
+          color_start: string;
+          color_end: string;
+          direction: 'horizontal' | 'vertical' | 'radial';
+          steps?: number;
+        };
+        const steps = Math.min(32, Math.max(8, sgArgs.steps ?? 16));
+        const { zone, color_start, color_end, direction } = sgArgs;
+        const gradientElements: Array<Record<string, unknown>> = [];
+
+        for (let i = 0; i < steps; i++) {
+          const t = i / (steps - 1);
+          const color = interpolateHex(color_start, color_end, t);
+          let x = zone.x, y = zone.y, w = zone.width, h = zone.height;
+
+          if (direction === 'horizontal') {
+            x = zone.x + (zone.width / steps) * i;
+            w = zone.width / steps + 1;
+          } else if (direction === 'vertical') {
+            y = zone.y + (zone.height / steps) * i;
+            h = zone.height / steps + 1;
+          } else {
+            // radial: concentric rectangles
+            const inset = (Math.min(zone.width, zone.height) / 2) * t;
+            x = zone.x + inset;
+            y = zone.y + inset;
+            w = Math.max(1, zone.width - inset * 2);
+            h = Math.max(1, zone.height - inset * 2);
+          }
+
+          gradientElements.push({
+            type: 'rectangle', x, y, width: w, height: h,
+            backgroundColor: color,
+            strokeColor: 'transparent',
+            strokeWidth: 0,
+            fillStyle: 'solid',
+            roughness: 0,
+            opacity: Math.round(85 - t * 15),
+            layer: 0
+          });
+        }
+
+        const batchResp = await fetch(`${EXPRESS_SERVER_URL}/api/elements/batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ elements: gradientElements })
+        });
+        const batchData = await batchResp.json() as { elements?: Array<{ id: string }> };
+        const ids = (batchData.elements ?? []).map(e => e.id);
+        return { content: [{ type: 'text', text: `Created ${ids.length} gradient elements. IDs: ${ids.join(', ')}` }] };
       }
 
       default:
