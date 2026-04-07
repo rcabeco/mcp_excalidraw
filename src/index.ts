@@ -27,6 +27,9 @@ import {
   ExcalidrawElementType,
   validateElement
 } from './types.js';
+import type {
+  CompositionPlan, DrawingType, StylePreset, CompositionZone, ColorSlot
+} from './types.js';
 import fetch from 'node-fetch';
 
 // Load environment variables
@@ -194,6 +197,89 @@ const sceneState: SceneState = {
   viewport: { x: 0, y: 0, zoom: 1 },
   selectedElements: new Set(),
   groups: new Map()
+};
+
+const compositionPlans = new Map<string, CompositionPlan>();
+
+function evictStalePlans(): void {
+  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  for (const [id, plan] of compositionPlans) {
+    if (plan.createdAt < cutoff) compositionPlans.delete(id);
+  }
+}
+
+const STYLE_PALETTES: Record<StylePreset, ColorSlot[]> = {
+  Sketchy: [
+    { slot: 'background', hex: '#fdf6e3' }, { slot: 'surface', hex: '#f5ebe0' },
+    { slot: 'primary', hex: '#8b5e3c' }, { slot: 'accent', hex: '#d4a76a' },
+    { slot: 'shadow', hex: '#6b4226' }, { slot: 'highlight', hex: '#f9c784' },
+    { slot: 'text', hex: '#3d2b1f' }
+  ],
+  Clean: [
+    { slot: 'background', hex: '#f8f9fa' }, { slot: 'surface', hex: '#ffffff' },
+    { slot: 'primary', hex: '#1971c2' }, { slot: 'accent', hex: '#4a9eff' },
+    { slot: 'shadow', hex: '#adb5bd' }, { slot: 'highlight', hex: '#e7f5ff' },
+    { slot: 'text', hex: '#212529' }
+  ],
+  Painted: [
+    { slot: 'background', hex: '#1a1a2e' }, { slot: 'surface', hex: '#16213e' },
+    { slot: 'primary', hex: '#e94560' }, { slot: 'accent', hex: '#f5a623' },
+    { slot: 'shadow', hex: '#0f3460' }, { slot: 'highlight', hex: '#ffd700' },
+    { slot: 'text', hex: '#eaeaea' }
+  ],
+  Technical: [
+    { slot: 'background', hex: '#ffffff' }, { slot: 'surface', hex: '#f1f3f5' },
+    { slot: 'primary', hex: '#1e1e1e' }, { slot: 'accent', hex: '#1971c2' },
+    { slot: 'shadow', hex: '#868e96' }, { slot: 'highlight', hex: '#e9ecef' },
+    { slot: 'text', hex: '#1e1e1e' }
+  ],
+  Isometric: [
+    { slot: 'background', hex: '#dfe9f3' }, { slot: 'surface', hex: '#c8d8e8' },
+    { slot: 'primary', hex: '#2c5f8a' }, { slot: 'accent', hex: '#5ba3d9' },
+    { slot: 'shadow', hex: '#1a3a55' }, { slot: 'highlight', hex: '#9ecfee' },
+    { slot: 'text', hex: '#1a2e3d' }
+  ]
+};
+
+function buildZones(type: DrawingType, w: number, h: number): CompositionZone[] {
+  switch (type) {
+    case 'arch': return [
+      { name: 'title-bar', x: 0, y: 0, width: w, height: 60, densityTarget: { min: 1, max: 3 } },
+      { name: 'legend', x: 0, y: 60, width: 160, height: h - 60, densityTarget: { min: 2, max: 6 } },
+      { name: 'main-grid', x: 160, y: 60, width: w - 160, height: h - 60, densityTarget: { min: 8, max: 20 } }
+    ];
+    case 'infographic': return [
+      { name: 'hero', x: 0, y: 0, width: w, height: Math.round(h * 0.3), densityTarget: { min: 2, max: 5 } },
+      { name: 'col-left', x: 0, y: Math.round(h * 0.3), width: Math.round(w / 3), height: Math.round(h * 0.6), densityTarget: { min: 3, max: 8 } },
+      { name: 'col-center', x: Math.round(w / 3), y: Math.round(h * 0.3), width: Math.round(w / 3), height: Math.round(h * 0.6), densityTarget: { min: 3, max: 8 } },
+      { name: 'col-right', x: Math.round(w * 2 / 3), y: Math.round(h * 0.3), width: Math.round(w / 3), height: Math.round(h * 0.6), densityTarget: { min: 3, max: 8 } },
+      { name: 'footer', x: 0, y: Math.round(h * 0.9), width: w, height: Math.round(h * 0.1), densityTarget: { min: 1, max: 3 } }
+    ];
+    case 'art': return [
+      { name: 'sky', x: 0, y: 0, width: w, height: Math.round(h * 0.35), densityTarget: { min: 10, max: 30 } },
+      { name: 'horizon', x: 0, y: Math.round(h * 0.35), width: w, height: Math.round(h * 0.15), densityTarget: { min: 5, max: 15 } },
+      { name: 'midground', x: 0, y: Math.round(h * 0.5), width: w, height: Math.round(h * 0.3), densityTarget: { min: 15, max: 40 } },
+      { name: 'foreground', x: 0, y: Math.round(h * 0.8), width: w, height: Math.round(h * 0.2), densityTarget: { min: 10, max: 25 } }
+    ];
+    case 'ui': return [
+      { name: 'nav', x: 0, y: 0, width: w, height: 48, densityTarget: { min: 3, max: 8 } },
+      { name: 'sidebar', x: 0, y: 48, width: Math.round(w * 0.2), height: h - 48, densityTarget: { min: 4, max: 12 } },
+      { name: 'content', x: Math.round(w * 0.2), y: 48, width: Math.round(w * 0.8), height: h - 48, densityTarget: { min: 6, max: 18 } }
+    ];
+    case 'map': return [
+      { name: 'main-area', x: 0, y: 0, width: Math.round(w * 0.8), height: Math.round(h * 0.9), densityTarget: { min: 8, max: 25 } },
+      { name: 'legend', x: Math.round(w * 0.8), y: 0, width: Math.round(w * 0.2), height: Math.round(h * 0.5), densityTarget: { min: 3, max: 8 } },
+      { name: 'title', x: 0, y: Math.round(h * 0.9), width: w, height: Math.round(h * 0.1), densityTarget: { min: 1, max: 2 } }
+    ];
+  }
+}
+
+const TYPE_RULES: Record<DrawingType, string[]> = {
+  arch: ['visual-hierarchy', 'consistent-sizing', 'arrow-binding', 'zone-separation'],
+  infographic: ['rule-of-thirds', 'visual-hierarchy', 'color-harmony', 'gradient-hero'],
+  art: ['depth-layers', 'rule-of-thirds', 'color-harmony', 'texture-variation', 'negative-space'],
+  ui: ['alignment-grid', 'consistent-sizing', 'visual-hierarchy', 'negative-space'],
+  map: ['spatial-accuracy', 'consistent-sizing', 'legend-required', 'grid-snap']
 };
 
 // Points schema: accept both {x, y} objects and [x, y] tuples
@@ -707,6 +793,21 @@ const tools: Tool[] = [
         }
       },
       required: ['format']
+    }
+  },
+  {
+    name: 'plan_composition',
+    description: 'Generate a structured canvas blueprint before drawing. Returns zones, color palette, drawing phases, and composition rules based on drawing type and style. ALWAYS call this before starting a new drawing — it is the entry point for the 5-phase drawing workflow.',
+    inputSchema: {
+      type: 'object',
+      required: ['description', 'drawing_type', 'style_preset'],
+      properties: {
+        description: { type: 'string', description: 'What to draw' },
+        drawing_type: { type: 'string', enum: ['arch', 'infographic', 'art', 'ui', 'map'] },
+        canvas_width: { type: 'number', description: 'Canvas width in pixels (default 1200)' },
+        canvas_height: { type: 'number', description: 'Canvas height in pixels (default 800)' },
+        style_preset: { type: 'string', enum: ['Sketchy', 'Clean', 'Painted', 'Technical', 'Isometric'] }
+      }
     }
   },
   {
@@ -2174,6 +2275,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest)
             type: 'text',
             text: `Viewport updated successfully.\n\n${JSON.stringify(viewportResult, null, 2)}`
           }]
+        };
+      }
+
+      case 'plan_composition': {
+        evictStalePlans();
+        const pcArgs = request.params.arguments as {
+          description: string;
+          drawing_type: DrawingType;
+          canvas_width?: number;
+          canvas_height?: number;
+          style_preset: StylePreset;
+        };
+        const w = pcArgs.canvas_width ?? 1200;
+        const h = pcArgs.canvas_height ?? 800;
+        const zones = buildZones(pcArgs.drawing_type, w, h);
+        const plan: CompositionPlan = {
+          planId: generateId(),
+          drawingType: pcArgs.drawing_type,
+          canvasWidth: w,
+          canvasHeight: h,
+          stylePreset: pcArgs.style_preset,
+          zones,
+          colorPalette: STYLE_PALETTES[pcArgs.style_preset],
+          phases: zones.flatMap((zone) => [
+            { phase: 2, zone: zone.name, elementTypes: ['rectangle', 'text'] as ExcalidrawElementType[], targetCount: Math.ceil(zone.densityTarget.min * 0.2) },
+            { phase: 3, zone: zone.name, elementTypes: ['rectangle', 'ellipse', 'text', 'line', 'freedraw'] as ExcalidrawElementType[], targetCount: zone.densityTarget.min }
+          ]),
+          compositionRules: TYPE_RULES[pcArgs.drawing_type],
+          createdAt: Date.now()
+        };
+        compositionPlans.set(plan.planId, plan);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(plan, null, 2) }]
         };
       }
 
